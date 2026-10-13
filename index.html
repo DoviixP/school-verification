@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173b78">
+  <title>Student ID Verification</title>
+  <style>
+    :root { color-scheme: light; --blue:#173b78; --pale:#eef4ff; --ink:#182230; --muted:#5b6573; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#f3f6fb; color:var(--ink); font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+    header { background:var(--blue); color:white; padding:24px 18px; text-align:center; }
+    header h1 { margin:0; font-size:clamp(1.35rem,4vw,2rem); }
+    header p { margin:6px 0 0; opacity:.9; }
+    main { width:min(680px, calc(100% - 28px)); margin:26px auto; }
+    .card { background:white; border:1px solid #dce3ed; border-radius:16px; padding:22px; box-shadow:0 8px 28px #14284a0c; }
+    .status { border-radius:10px; padding:12px 14px; margin-bottom:18px; font-weight:700; background:var(--pale); color:var(--blue); }
+    .status.error { background:#fff0f0; color:#a11b1b; }
+    dl { margin:0; display:grid; grid-template-columns:minmax(125px, .8fr) 1.2fr; gap:0; }
+    dt,dd { padding:11px 0; border-bottom:1px solid #edf0f4; overflow-wrap:anywhere; }
+    dt { color:var(--muted); }
+    dd { margin:0; font-weight:600; }
+    .small { color:var(--muted); font-size:.9rem; margin-top:18px; }
+    .school { background:white; border:1px solid #dce3ed; border-radius:16px; padding:20px; margin-top:16px; }
+    .school h2 { margin:0 0 8px; font-size:1.1rem; }
+    .advert { margin-top:16px; background:#fff; border:1px dashed #9aa9c0; border-radius:12px; padding:15px; text-align:center; }
+    .advert a { color:var(--blue); font-weight:700; }
+    footer { text-align:center; color:var(--muted); font-size:.82rem; padding:12px 18px 30px; }
+    @media(max-width:420px) { .card { padding:16px; } dl { grid-template-columns:1fr; } dt { border-bottom:0; padding-bottom:0; } dd { padding-top:3px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="pageTitle">Student ID Verification</h1>
+    <p>School identity record lookup</p>
+  </header>
+  <main>
+    <section class="card" aria-live="polite">
+      <div id="status" class="status">Checking verification record…</div>
+      <dl id="details" hidden>
+        <dt>Student name</dt><dd id="studentName"></dd>
+        <dt>School</dt><dd id="schoolName"></dd>
+        <dt>Student ID</dt><dd id="studentId"></dd>
+        <dt>National matricule</dt><dd id="nationalMatricule"></dd>
+        <dt>Class</dt><dd id="className"></dd>
+        <dt>Academic year</dt><dd id="academicYear"></dd>
+      </dl>
+      <p class="small">This page displays the record last synchronized by the school. It verifies a registry entry, not the physical material of the card.</p>
+    </section>
+    <section class="school">
+      <h2>About this school</h2>
+      <p id="schoolDescription">Contact the school administration if you need additional information about this card.</p>
+      <p id="schoolContact"></p>
+    </section>
+    <section class="advert">
+      <strong>School digital services</strong>
+      <p>Digital school tools and student ID solutions by <a id="businessLink" href="https://github.com/" rel="noopener">DoviixTech</a>.</p>
+    </section>
+  </main>
+  <footer>Student identity verification · Information shown is limited to the school's published registry.</footer>
+<script>
+  // After deploying Apps Script, paste its /exec URL below.
+  const REGISTRY_API_URL = 'https://script.google.com/macros/s/AKfycbz46MV36JWQuJy6Ypo1VVGFw1CDz4AHQi7gskF5JDY8L1a6sfOcAiJvnaGveqj2Uy-b/exec';
+  const BUSINESS_URL = 'https://github.com/'; // Replace with your business website/contact page.
+  const BUSINESS_NAME = 'DoviixTech';
+  document.getElementById('businessLink').href = BUSINESS_URL;
+  document.getElementById('businessLink').textContent = BUSINESS_NAME;
+
+  const statusEl = document.getElementById('status');
+  const params = new URLSearchParams(window.location.search);
+  const verificationId = params.get('id');
+
+  function showError(message) {
+    statusEl.textContent = message;
+    statusEl.classList.add('error');
+  }
+  function put(id, value) {
+    document.getElementById(id).textContent = value || 'Not provided';
+  }
+  function lookup() {
+    if (!verificationId) {
+      showError('No verification ID was supplied. Scan the QR code on the student card.');
+      return;
+    }
+    if (!REGISTRY_API_URL.startsWith('https://script.google.com/macros/s/')) {
+      showError('Verification service is not configured yet.');
+      return;
+    }
+    const callbackName = '__schoolVerifyCallback';
+    const script = document.createElement('script');
+    const timeout = setTimeout(() => {
+      delete window[callbackName];
+      script.remove();
+      showError('The registry could not be reached. Please try again later.');
+    }, 15000);
+
+    window[callbackName] = result => {
+      clearTimeout(timeout);
+      script.remove();
+      delete window[callbackName];
+      if (!result || !result.success || !result.student) {
+        showError('No matching student record was found in the latest published registry.');
+        return;
+      }
+      const s = result.student;
+      statusEl.textContent = 'Student record found';
+      put('studentName', s.student_name);
+      put('schoolName', s.school_name);
+      put('studentId', s.student_id);
+      put('nationalMatricule', s.national_matricule);
+      put('className', s.class_name);
+      put('academicYear', s.academic_year);
+      document.getElementById('details').hidden = false;
+      document.getElementById('pageTitle').textContent = s.school_name || 'Student ID Verification';
+    };
+    const url = new URL(REGISTRY_API_URL);
+    url.searchParams.set('id', verificationId);
+    url.searchParams.set('callback', callbackName);
+    script.src = url.toString();
+    script.onerror = () => {
+      clearTimeout(timeout);
+      script.remove();
+      delete window[callbackName];
+      showError('The registry could not be reached. Please try again later.');
+    };
+    document.body.appendChild(script);
+  }
+  lookup();
+</script>
+</body>
+</html>
