@@ -58,74 +58,160 @@
     </section>
   </main>
   <footer>Student identity verification · Information shown is limited to the school's published registry.</footer>
+
 <script>
-  // After deploying Apps Script, paste its /exec URL below.
-  const REGISTRY_API_URL = 'https://script.google.com/macros/s/AKfycbz46MV36JWQuJy6Ypo1VVGFw1CDz4AHQi7gskF5JDY8L1a6sfOcAiJvnaGveqj2Uy-b/exec';
-  const BUSINESS_URL = 'https://github.com/'; // Replace with your business website/contact page.
+  const REGISTRY_API_URL =
+    'https://script.google.com/macros/s/AKfycbz46MV36JWQuJy6Ypo1VVGFw1CDz4AHQi7gskF5JDY8L1a6sfOcAiJvnaGveqj2Uy-b/exec';
+
+  const BUSINESS_URL = 'https://github.com/';
   const BUSINESS_NAME = 'DoviixTech';
+
   document.getElementById('businessLink').href = BUSINESS_URL;
   document.getElementById('businessLink').textContent = BUSINESS_NAME;
 
   const statusEl = document.getElementById('status');
+  const detailsEl = document.getElementById('details');
   const params = new URLSearchParams(window.location.search);
   const verificationId = params.get('id');
 
+  let attempts = 0;
+  const maxAttempts = 3;
+  let activeScript = null;
+  let requestTimeout = null;
+  let callbackName = null;
+
+  function cleanup() {
+    clearTimeout(requestTimeout);
+
+    if (activeScript) {
+      activeScript.remove();
+      activeScript = null;
+    }
+
+    if (callbackName) {
+      try {
+        delete window[callbackName];
+      } catch (_) {
+        window[callbackName] = undefined;
+      }
+      callbackName = null;
+    }
+  }
+
   function showError(message) {
+    cleanup();
     statusEl.textContent = message;
     statusEl.classList.add('error');
   }
+
   function put(id, value) {
-    document.getElementById(id).textContent = value || 'Not provided';
+    document.getElementById(id).textContent =
+      value == null || String(value).trim() === ''
+        ? 'Not provided'
+        : String(value);
   }
+
+  function retryOrFail() {
+    cleanup();
+
+    if (attempts < maxAttempts) {
+      statusEl.classList.remove('error');
+      statusEl.textContent =
+        'Connection failed. Retrying verification (' +
+        (attempts + 1) + '/' + maxAttempts + ')…';
+
+      setTimeout(lookup, 1000 * attempts);
+    } else {
+      showError(
+        'The registry could not be reached after ' +
+        maxAttempts +
+        ' attempts. Check your internet connection and try again.'
+      );
+    }
+  }
+
   function lookup() {
     if (!verificationId) {
-      showError('No verification ID was supplied. Scan the QR code on the student card.');
+      showError(
+        'No verification ID was supplied. Scan the QR code on the student card.'
+      );
       return;
     }
-    if (!REGISTRY_API_URL.startsWith('https://script.google.com/macros/s/')) {
-      showError('Verification service is not configured yet.');
-      return;
-    }
-    const callbackName = '__schoolVerifyCallback';
-    const script = document.createElement('script');
-    const timeout = setTimeout(() => {
-      delete window[callbackName];
-      script.remove();
-      showError('The registry could not be reached. Please try again later.');
-    }, 15000);
 
-    window[callbackName] = result => {
-      clearTimeout(timeout);
-      script.remove();
-      delete window[callbackName];
-      if (!result || !result.success || !result.student) {
-        showError('No matching student record was found in the latest published registry.');
+    if (!REGISTRY_API_URL.startsWith(
+      'https://script.google.com/macros/s/'
+    )) {
+      showError('Verification service is not configured correctly.');
+      return;
+    }
+
+    attempts++;
+
+    statusEl.classList.remove('error');
+    statusEl.textContent = 'Checking verification record…';
+
+    callbackName =
+      '__schoolVerify_' + Date.now() + '_' + attempts;
+
+    activeScript = document.createElement('script');
+    activeScript.async = true;
+
+    let completed = false;
+
+    function finish(result) {
+      if (completed) return;
+      completed = true;
+      cleanup();
+
+      if (!result || result.success !== true || !result.student) {
+        showError(
+          'No matching student record was found in the published registry.'
+        );
         return;
       }
+
       const s = result.student;
+
+      statusEl.classList.remove('error');
       statusEl.textContent = 'Student record found';
+
       put('studentName', s.student_name);
       put('schoolName', s.school_name);
       put('studentId', s.student_id);
       put('nationalMatricule', s.national_matricule);
       put('className', s.class_name);
       put('academicYear', s.academic_year);
-      document.getElementById('details').hidden = false;
-      document.getElementById('pageTitle').textContent = s.school_name || 'Student ID Verification';
-    };
+
+      detailsEl.hidden = false;
+      document.getElementById('pageTitle').textContent =
+        s.school_name || 'Student ID Verification';
+    }
+
+    window[callbackName] = finish;
+
     const url = new URL(REGISTRY_API_URL);
     url.searchParams.set('id', verificationId);
     url.searchParams.set('callback', callbackName);
-    script.src = url.toString();
-    script.onerror = () => {
-      clearTimeout(timeout);
-      script.remove();
-      delete window[callbackName];
-      showError('The registry could not be reached. Please try again later.');
+    url.searchParams.set('_', Date.now().toString());
+
+    activeScript.onerror = () => {
+      if (completed) return;
+      completed = true;
+      retryOrFail();
     };
-    document.body.appendChild(script);
+
+    requestTimeout = setTimeout(() => {
+      if (completed) return;
+      completed = true;
+      retryOrFail();
+    }, 12000);
+
+    activeScript.src = url.toString();
+    document.body.appendChild(activeScript);
   }
+
   lookup();
 </script>
+
 </body>
 </html>
